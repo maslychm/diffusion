@@ -1,20 +1,27 @@
-import os
+"""
+This script will iterate over combinations of parameters and save results to a CSV.
+To run: `python start_fox.py`
+"""
+
 import subprocess
-import threading
-import time
 import pandas as pd
 
 def main():
 
-    hws = [256, 512, 768]
+    # Params
+    hws = [256, 512, 768, 2014]
     stepss = [10, 50, 100, 200]
     repeats = 3
 
+    print("Total number of runs: ", runs:=len(hws) * len(stepss) * repeats)
+    run = 0
     dfs = []
     for r in range(repeats):
         for hw in hws:
             for steps in stepss:
-                print(f"Running for height/width: {hw}, steps: {steps}")
+                run += 1
+                print("\n=====================================")
+                print(f"Run {run}/{runs}", f"height/width: {hw}, steps: {steps}")
 
                 # run this script with the following command:
                 # python measure_ram.py --prompt "A street spray painted art of a fox riding a rocket to the moon." --size 768 --steps 100 --repetition 0
@@ -25,6 +32,7 @@ def main():
                 dfs.append(df)
 
     df = pd.concat(dfs)
+    # collect all the results in a single csv file
     df.to_csv("results/timings.csv", index=False)
 
 if __name__ == "__main__":

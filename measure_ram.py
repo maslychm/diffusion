@@ -11,6 +11,11 @@ from tqdm.auto import trange
 import time
 import pandas as pd
 
+"""Example run:
+`python measure_ram.py --prompt "a man on the moon" --size 768 --steps 100 --repetition 3
+"""
+
+
 stop_thread = True
 
 class GPUUsageThread(threading.Thread):
@@ -35,7 +40,7 @@ class GPUUsageThread(threading.Thread):
                 self.peak_ram = used_memory
 
             # Sleep for 0.1 seconds
-            time.sleep(0.1)
+            time.sleep(0.01)
 
             global stop_thread
             if stop_thread:
@@ -126,10 +131,8 @@ gpu_usage_thread = GPUUsageThread("python")
 gpu_usage_thread.start()
 df, image = collect_profiler_info(pipe, args.prompt, height=args.size, width=args.size, steps=args.steps)
 peak_gpu_ram = gpu_usage_thread.finalize()
-print("here")
 stop_thread = True
 gpu_usage_thread.join()
-print("here2")
 print(f"Peak GPU RAM usage: {peak_gpu_ram} MB")
 
 df["size"] = args.size
