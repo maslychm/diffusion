@@ -11,6 +11,8 @@ from tqdm.auto import trange
 import time
 import pandas as pd
 
+stop_thread = True
+
 class GPUUsageThread(threading.Thread):
     def __init__(self, process_name):
         super().__init__()
@@ -19,25 +21,28 @@ class GPUUsageThread(threading.Thread):
         self.peak_ram = 0
     
     def run(self):
-        # Start the subprocess to measure GPU usage
-        command = f"nvidia-smi --query-compute-apps=process_name,pid,used_memory --format=csv | grep {self.process_name}"
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True, text=True)
-
         # Continuously read the output of the subprocess and update peak RAM usage
-        for line in iter(self.process.stdout.readline, ""):
-            # Parse the used memory value from the output line
+        while True:
             try:
-                used_memory = int(line.split(",")[2].strip().split()[0])
+                output = subprocess.check_output("nvidia-smi --query-compute-apps=process_name,pid,used_memory --format=csv | grep python", shell=True)
+                output_str = output.decode("utf-8")
+                used_memory = int(output_str.split(",")[2].strip().split()[0])
             except:
                 used_memory = 0
-            
+                
             # Update the peak RAM usage
             if used_memory > self.peak_ram:
                 self.peak_ram = used_memory
+
+            # Sleep for 0.1 seconds
+            time.sleep(0.1)
+
+            global stop_thread
+            if stop_thread:
+                break
     
     def finalize(self):
         print("Finalizing GPU RAM measuring thread")
-        self.process.terminate()
         return self.peak_ram
 
 text_to_im_model_id = "stabilityai/stable-diffusion-2"
@@ -116,10 +121,15 @@ argparser.add_argument("--repetition", type=int, default=0)
 
 args = argparser.parse_args()
 
+stop_thread = False
 gpu_usage_thread = GPUUsageThread("python")
 gpu_usage_thread.start()
 df, image = collect_profiler_info(pipe, args.prompt, height=args.size, width=args.size, steps=args.steps)
 peak_gpu_ram = gpu_usage_thread.finalize()
+print("here")
+stop_thread = True
+gpu_usage_thread.join()
+print("here2")
 print(f"Peak GPU RAM usage: {peak_gpu_ram} MB")
 
 df["size"] = args.size
