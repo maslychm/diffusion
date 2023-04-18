@@ -1,3 +1,37 @@
+import subprocess
+import threading
+import argparse
+
+class GPUUsageThread(threading.Thread):
+    def __init__(self, process_name):
+        super().__init__()
+        self.process_name = process_name
+        self.process = None
+        self.peak_ram = 0
+    
+    def run(self):
+        # Start the subprocess to measure GPU usage
+        command = f"nvidia-smi --query-compute-apps=process_name,pid,used_memory --format=csv | grep {self.process_name}"
+        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True, text=True)
+
+        # Continuously read the output of the subprocess and update peak RAM usage
+        for line in iter(self.process.stdout.readline, ""):
+            # Parse the used memory value from the output line
+            try:
+                used_memory = int(line.split(",")[2].strip().split()[0])
+            except:
+                used_memory = 0
+            
+            # Update the peak RAM usage
+            if used_memory > self.peak_ram:
+                self.peak_ram = used_memory
+    
+    def finalize(self):
+        print("Finalizing GPU RAM measuring thread")
+        self.process.terminate()
+        return self.peak_ram
+
+
 # huggingface
 from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler
 import torch
@@ -77,40 +111,59 @@ def collect_profiler_info(pipe, prompt, height=768, width=768, steps=100):
     return timings_df, image
 
 
-hws = [256, 512, 768]
-stepss = [10, 50, 100, 200]
-repeats = 3
+def main():
 
-dfs = []
-for r in range(repeats):
-    for hw in hws:
-        for steps in stepss:
-            print(f"Running for height/width: {hw}, steps: {steps}")
-            df, image = collect_profiler_info(pipe, "A street spray painted art of a fox riding a rocket to the moon.", height=hw, width=hw, steps=steps)
-            df["size"] = hw
-            df["steps"] = steps
-            df.to_csv(f"results/timings_{hw}_{steps}_{r}.csv", index=False)
-            dfs.append(df)
+    hws = [256, 512, 768]
+    stepss = [10, 50, 100, 200]
+    repeats = 3
+    dfs = []
+    for r in range(repeats):
+        for hw in hws:
+            for steps in stepss:
+                print(f"Running for height/width: {hw}, steps: {steps}")
 
-df = pd.concat(dfs)
-df.to_csv("results/timings.csv", index=False)
+                # Start the GPU usage thread
+                gpu_thread = GPUUsageThread("python")
+                gpu_thread.start()
 
-# =============================================================================
-# Plots
-# =============================================================================
+                df, image = collect_profiler_info(pipe, "A street spray painted art of a fox riding a rocket to the moon.", height=hw, width=hw, steps=steps)
+                
+                # Wait for the thread to finish and get the peak RAM usage
+                peak_gpu_ram = gpu_thread.finalize()
+                print(f"Peak RAM usage: {peak_gpu_ram} MB")
+                
+                df["size"] = hw
+                df["steps"] = steps
+                df["peak_gpu_ram"] = peak_gpu_ram
+                df.to_csv(f"results/timings_{hw}_{steps}_{r}.csv", index=False)
+                dfs.append(df)
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
-import numpy as np
+    df = pd.concat(dfs)
+    df.to_csv("results/timings.csv", index=False)
 
-df = pd.read_csv("results/timings.csv")
-df["Image size"] = df["size"].astype(str) + "x" + df["size"].astype(str)
+# # parse args and run main
+# argparser = argparse.ArgumentParser()
+# argparser.add_argument("--prompt", type=str, default="A street spray painted art of a fox riding a rocket to the moon.")
 
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-sns.barplot(data=df, x="steps", y="total_time", hue="Image size", ax=ax)
-ax.set_title("Diffusion time VS num. steps and image size")
-ax.set_xlabel("Num. steps")
-ax.set_ylabel("Diffusion time (s)")
-fig.tight_layout()
-fig.savefig("results/diffusion_time_vs_steps_and_size.png", dpi=300)
+# main()
+
+
+# # =============================================================================
+# # Plots
+# # =============================================================================
+
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# import pandas as pd
+# import numpy as np
+
+# df = pd.read_csv("results/timings.csv")
+# df["Image size"] = df["size"].astype(str) + "x" + df["size"].astype(str)
+
+# fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+# sns.barplot(data=df, x="steps", y="total_time", hue="Image size", ax=ax)
+# ax.set_title("Diffusion time VS num. steps and image size")
+# ax.set_xlabel("Num. steps")
+# ax.set_ylabel("Diffusion time (s)")
+# fig.tight_layout()
+# fig.savefig("results/diffusion_time_vs_steps_and_size.png", dpi=300)
