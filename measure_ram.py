@@ -2,6 +2,15 @@ import subprocess
 import threading
 import argparse
 
+# huggingface
+from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler
+import torch
+from torch.profiler import profile, record_function, ProfilerActivity
+from tqdm.auto import trange
+
+import time
+import pandas as pd
+
 class GPUUsageThread(threading.Thread):
     def __init__(self, process_name):
         super().__init__()
@@ -31,22 +40,10 @@ class GPUUsageThread(threading.Thread):
         self.process.terminate()
         return self.peak_ram
 
-
-# huggingface
-from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler
-import torch
-from torch.profiler import profile, record_function, ProfilerActivity
-from tqdm.auto import trange
-
-import time
-import pandas as pd
-
 text_to_im_model_id = "stabilityai/stable-diffusion-2"
-
 scheduler = EulerDiscreteScheduler.from_pretrained(text_to_im_model_id, subfolder="scheduler")
 pipe = StableDiffusionPipeline.from_pretrained(text_to_im_model_id, scheduler=scheduler, revision="fp16", torch_dtype=torch.float16)
 pipe = pipe.to("cuda")
-
 if text_to_im_model_id=="stability/stable-diffusion-2":
     pipe.enable_attention_slicing()
 
@@ -110,60 +107,22 @@ def collect_profiler_info(pipe, prompt, height=768, width=768, steps=100):
     timings_df["total_time"] = total_time
     return timings_df, image
 
+# parse args and run main
+argparser = argparse.ArgumentParser()
+argparser.add_argument("--prompt", type=str, default="A street spray painted art of a fox riding a rocket to the moon.")
+argparser.add_argument("--size", type=int, default=768)
+argparser.add_argument("--steps", type=int, default=100)
+argparser.add_argument("--repetition", type=int, default=0)
 
-def main():
+args = argparser.parse_args()
 
-    hws = [256, 512, 768]
-    stepss = [10, 50, 100, 200]
-    repeats = 3
-    dfs = []
-    for r in range(repeats):
-        for hw in hws:
-            for steps in stepss:
-                print(f"Running for height/width: {hw}, steps: {steps}")
+gpu_usage_thread = GPUUsageThread("python")
+gpu_usage_thread.start()
+df, image = collect_profiler_info(pipe, args.prompt, height=args.size, width=args.size, steps=args.steps)
+peak_gpu_ram = gpu_usage_thread.finalize()
+print(f"Peak GPU RAM usage: {peak_gpu_ram} MB")
 
-                # Start the GPU usage thread
-                gpu_thread = GPUUsageThread("python")
-                gpu_thread.start()
-
-                df, image = collect_profiler_info(pipe, "A street spray painted art of a fox riding a rocket to the moon.", height=hw, width=hw, steps=steps)
-                
-                # Wait for the thread to finish and get the peak RAM usage
-                peak_gpu_ram = gpu_thread.finalize()
-                print(f"Peak RAM usage: {peak_gpu_ram} MB")
-                
-                df["size"] = hw
-                df["steps"] = steps
-                df["peak_gpu_ram"] = peak_gpu_ram
-                df.to_csv(f"results/timings_{hw}_{steps}_{r}.csv", index=False)
-                dfs.append(df)
-
-    df = pd.concat(dfs)
-    df.to_csv("results/timings.csv", index=False)
-
-# # parse args and run main
-# argparser = argparse.ArgumentParser()
-# argparser.add_argument("--prompt", type=str, default="A street spray painted art of a fox riding a rocket to the moon.")
-
-# main()
-
-
-# # =============================================================================
-# # Plots
-# # =============================================================================
-
-# import matplotlib.pyplot as plt
-# import seaborn as sns
-# import pandas as pd
-# import numpy as np
-
-# df = pd.read_csv("results/timings.csv")
-# df["Image size"] = df["size"].astype(str) + "x" + df["size"].astype(str)
-
-# fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-# sns.barplot(data=df, x="steps", y="total_time", hue="Image size", ax=ax)
-# ax.set_title("Diffusion time VS num. steps and image size")
-# ax.set_xlabel("Num. steps")
-# ax.set_ylabel("Diffusion time (s)")
-# fig.tight_layout()
-# fig.savefig("results/diffusion_time_vs_steps_and_size.png", dpi=300)
+df["size"] = args.size
+df["steps"] = args.steps
+df["peak_gpu_ram"] = peak_gpu_ram
+df.to_csv(f"results/timings_{args.size}_{args.steps}_{args.repetition}.csv", index=False)
