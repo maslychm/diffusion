@@ -52,8 +52,16 @@ class GPUUsageThread(threading.Thread):
 
 text_to_im_model_id = "stabilityai/stable-diffusion-2"
 scheduler = EulerDiscreteScheduler.from_pretrained(text_to_im_model_id, subfolder="scheduler")
-pipe = StableDiffusionPipeline.from_pretrained(text_to_im_model_id, scheduler=scheduler, revision="fp16", torch_dtype=torch.float16)
-pipe = pipe.to("cuda")
+pipe = StableDiffusionPipeline.from_pretrained(text_to_im_model_id, scheduler=scheduler, torch_dtype=torch.float32)
+pipe = pipe.to("cpu")
+
+
+pipe.unet = torch.ao.quantization.quantize_dynamic(
+    pipe.unet, 
+    {torch.nn.Linear, torch.nn.Conv2d}, 
+    dtype=torch.qint8)
+
+
 if text_to_im_model_id=="stability/stable-diffusion-2":
     pipe.enable_attention_slicing()
 
@@ -76,7 +84,7 @@ def makeimage(pipe, prompt, height=768, width=768, steps=100):
 
 def run_profiler(pipe, prompt, height=768, width=768, steps=100):
     with torch.no_grad():
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True, record_shapes=False) as prof:
+        with profile(activities=[ProfilerActivity.CPU], profile_memory=True, record_shapes=False) as prof:
             with record_function("model_inference"):
                 start_time = time.perf_counter()
                 image = makeimage(pipe, prompt, height=height, width=width, steps=steps)
@@ -97,15 +105,15 @@ def extract_timings(profiler_results):
         row = {
             "name": summary.key,
             "cpu_time_total": summary.cpu_time_total,
-            "cuda_time_total": summary.cuda_time_total,
+            #"cuda_time_total": summary.cuda_time_total,
             "self_cpu_time_total": summary.self_cpu_time_total,
-            "self_cuda_time_total": summary.self_cuda_time_total,
+            #"self_cuda_time_total": summary.self_cuda_time_total,
             "cpu_memory_usage": summary.cpu_memory_usage,
-            "cuda_memory_usage": summary.cuda_memory_usage,
+            #"cuda_memory_usage": summary.cuda_memory_usage,
             "self_cpu_memory_usage": summary.self_cpu_memory_usage,
-            "self_cuda_memory_usage": summary.self_cuda_memory_usage,
+            #"self_cuda_memory_usage": summary.self_cuda_memory_usage,
             "cpu_time": summary.cpu_time,
-            "cuda_time": summary.cuda_time,
+            #"cuda_time": summary.cuda_time,
             "count": summary.count
         }
         rows.append(row)

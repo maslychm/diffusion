@@ -1,0 +1,2 @@
+name,cpu_time_total,self_cpu_time_total,cpu_memory_usage,self_cpu_memory_usage,cpu_time,count,total_time,size,steps,peak_gpu_ram
+model_inference,1214316009,22120415,0,-1105670574608,1214316009.0,1,1214.315844420009,768,100,0
